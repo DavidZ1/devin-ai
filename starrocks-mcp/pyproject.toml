@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "starrocks-mcp"
+version = "0.1.0"
+description = "Read-only StarRocks MCP server"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastmcp>=4.1,<5",
+  "PyMySQL>=1.1",
+  "sqlglot>=30,<31",
+  "PyJWT>=2.8",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+starrocks-mcp = "starrocks_mcp:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/starrocks_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
