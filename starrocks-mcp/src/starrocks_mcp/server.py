@@ -87,7 +87,7 @@ def _run_audited(
             row_count = result.get("row_count")
             if row_count is None and isinstance(result.get("sample_rows"), list):
                 row_count = len(result["sample_rows"])
-            truncated = result.get("truncated")
+            truncated = result.get("truncated", result.get("sample_truncated"))
         return result
     except SqlRejected as exc:
         status = "rejected"
