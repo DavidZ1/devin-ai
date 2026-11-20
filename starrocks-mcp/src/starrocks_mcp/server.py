@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Any
 
+import anyio
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_headers
@@ -237,19 +238,23 @@ def _explain_query(sql: str, database: str | None, settings: Settings) -> str:
 @mcp.tool(description="列出当前账号可访问的数据库；系统数据库默认隐藏。")
 async def list_databases() -> list[str]:
     settings = SETTINGS
-    return _run_audited(
-        settings, "list_databases", lambda: _list_databases(settings)
+    return await anyio.to_thread.run_sync(
+        lambda: _run_audited(
+            settings, "list_databases", lambda: _list_databases(settings)
+        )
     )
 
 
 @mcp.tool(description="列出指定数据库中的表及表类型、注释。")
 async def list_tables(database: str) -> list[dict[str, Any]]:
     settings = SETTINGS
-    return _run_audited(
-        settings,
-        "list_tables",
-        lambda: _list_tables(database, settings),
-        database=database,
+    return await anyio.to_thread.run_sync(
+        lambda: _run_audited(
+            settings,
+            "list_tables",
+            lambda: _list_tables(database, settings),
+            database=database,
+        )
     )
 
 
@@ -258,11 +263,13 @@ async def describe_table(
     database: str, table: str, sample_rows: int = 3
 ) -> dict[str, Any]:
     settings = SETTINGS
-    return _run_audited(
-        settings,
-        "describe_table",
-        lambda: _describe_table(database, table, sample_rows, settings),
-        database=database,
+    return await anyio.to_thread.run_sync(
+        lambda: _run_audited(
+            settings,
+            "describe_table",
+            lambda: _describe_table(database, table, sample_rows, settings),
+            database=database,
+        )
     )
 
 
@@ -276,24 +283,28 @@ async def run_query(
     sql: str, database: str | None = None, max_rows: int | None = None
 ) -> dict[str, Any]:
     settings = SETTINGS
-    return _run_audited(
-        settings,
-        "run_query",
-        lambda: _run_query(sql, database, max_rows, settings),
-        database=database or settings.default_db,
-        sql=sql,
+    return await anyio.to_thread.run_sync(
+        lambda: _run_audited(
+            settings,
+            "run_query",
+            lambda: _run_query(sql, database, max_rows, settings),
+            database=database or settings.default_db,
+            sql=sql,
+        )
     )
 
 
 @mcp.tool(description="对只读 SELECT 查询生成 StarRocks EXPLAIN 执行计划，不执行查询。")
 async def explain_query(sql: str, database: str | None = None) -> str:
     settings = SETTINGS
-    return _run_audited(
-        settings,
-        "explain_query",
-        lambda: _explain_query(sql, database, settings),
-        database=database or settings.default_db,
-        sql=sql,
+    return await anyio.to_thread.run_sync(
+        lambda: _run_audited(
+            settings,
+            "explain_query",
+            lambda: _explain_query(sql, database, settings),
+            database=database or settings.default_db,
+            sql=sql,
+        )
     )
 
 

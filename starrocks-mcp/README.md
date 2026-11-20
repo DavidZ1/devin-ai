@@ -97,7 +97,15 @@ server {
 
 ### 豆包工作伙伴（飞书 aily）
 
-在企业 MCP 设置中注册 `https://{tenant}.feishu.cn/ai/mcpservers`，Endpoint 类型选择 **Streamable HTTP**，地址填写 MCP `/mcp` URL。请求头添加 `Authorization`，类型/方式选固定值，值为 `Bearer <token>`。如启用 JWT 身份令牌，在服务端配置对应签名密钥 `AILY_JWT_SECRET`；需要强制身份令牌时同时设置 `AILY_JWT_REQUIRED=true`。aily 客户端不能访问仅内网可达的地址，服务需部署在其可访问的 HTTPS 网络中。
+1. 打开 `https://{公司前缀}.feishu.cn/ai/mcpservers`。
+2. 点击「注册企业内部 MCP 服务」。
+3. 请求地址填写 `https://<域名>/mcp`，Endpoint 类型选择 **Streamable HTTP**。
+4. 添加请求头 `Authorization`，输入方式选择「固定值」，值填写 `Bearer <token>`。
+5. 可选开启「JWT 身份令牌」，将编辑页显示的签名密钥配置到服务端 `AILY_JWT_SECRET`；需要强制身份令牌时同时设置 `AILY_JWT_REQUIRED=true`。
+6. 设置可用范围。
+7. 在智能体中选择「从 MCP 库添加」并启用工具。
+
+豆包工作伙伴无法访问仅内网可达的地址。客户端从平台出口访问；如有防火墙，需放行其出口 IP（以飞书官方说明为准）。
 
 ### Cursor
 
@@ -157,6 +165,51 @@ Cursor / Claude Code / Codex 等本地客户端可以直接启动 stdio 服务�
   }
 }
 ```
+
+## 本地验证
+
+以下命令在本仓库的 `starrocks-mcp/` 目录执行。首次启动本地 StarRocks all-in-one 容器：
+
+```bash
+docker run -d -p 9030:9030 -p 8030:8030 -p 8040:8040 --name sr starrocks/allin1-ubuntu
+```
+
+FE/BE 完成启动后，用 root 创建示例数据库、表和只读账号（`readpass` 仅供本地测试）：
+
+```bash
+./.venv/bin/python - <<'PY'
+import pymysql
+
+root = pymysql.connect(host="127.0.0.1", port=9030, user="root", password="", autocommit=True, charset="utf8mb4", connect_timeout=10)
+with root.cursor() as cursor:
+    cursor.execute("CREATE DATABASE IF NOT EXISTS demo")
+    cursor.execute("CREATE TABLE IF NOT EXISTS demo.smoke_test (id INT, name VARCHAR(64)) ENGINE=OLAP DUPLICATE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES (\"replication_num\" = \"1\")")
+    cursor.execute("INSERT INTO demo.smoke_test VALUES (1, 'alpha'), (2, 'beta'), (3, 'gamma')")
+    cursor.execute("CREATE USER IF NOT EXISTS 'mcp_readonly'@'%' IDENTIFIED BY 'readpass'")
+    cursor.execute("GRANT SELECT ON ALL TABLES IN DATABASE demo TO USER 'mcp_readonly'@'%'")
+root.close()
+PY
+```
+
+在一个终端启动 Streamable HTTP 服务（API Key 为本地测试令牌）：
+
+```bash
+STARROCKS_HOST=127.0.0.1 STARROCKS_PORT=9030 STARROCKS_USER=mcp_readonly STARROCKS_PASSWORD=readpass STARROCKS_DEFAULT_DB=demo MCP_TRANSPORT=streamable-http MCP_API_KEYS=test=xxx ./.venv/bin/starrocks-mcp --transport streamable-http --host 127.0.0.1 --port 8000
+```
+
+在另一个终端运行自动冒烟测试，它会调用全部五个工具，并确认写 SQL 与无令牌请求被拒绝：
+
+```bash
+./.venv/bin/python scripts/e2e_smoke.py
+```
+
+也可手动使用 MCP Inspector：
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+在 Inspector 中选择 **Streamable HTTP**，地址填写 `http://127.0.0.1:8000/mcp`，并在请求头添加 `Authorization: Bearer xxx`，连接后检查五个工具。
 
 ## 安全边界
 
