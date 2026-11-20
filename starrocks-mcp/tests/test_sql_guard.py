@@ -64,5 +64,49 @@ def test_cte_alias_is_not_mistaken_for_table():
     )
 
 
+def test_qualified_table_cannot_bypass_allowlist_with_cte_name():
+    with pytest.raises(SqlRejected, match="不在允许列表"):
+        validate_select(
+            "WITH items AS (SELECT 1) SELECT * FROM secret.items",
+            default_db="analytics",
+            allowed_dbs={"analytics"},
+        )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'SELECT * FROM FILES("path"="data.csv")',
+        (
+            'SELECT * FROM analytics.items '
+            'JOIN FILES("path"="data.csv") AS f ON 1 = 1'
+        ),
+        'SELECT * FROM (SELECT * FROM FILES("path"="data.csv")) AS source',
+    ],
+)
+def test_rejects_table_functions(sql):
+    with pytest.raises(SqlRejected, match="表函数"):
+        validate_select(
+            sql,
+            default_db="analytics",
+            allowed_dbs={"analytics"},
+        )
+
+
+def test_rejects_non_default_catalog():
+    with pytest.raises(SqlRejected, match="外部 catalog"):
+        validate_select(
+            "SELECT * FROM hive_cat.db.items",
+            allowed_dbs={"db"},
+        )
+
+
+def test_allows_default_catalog_with_allowed_database():
+    validate_select(
+        "SELECT * FROM default_catalog.analytics.items",
+        allowed_dbs={"analytics"},
+    )
+
+
 def test_trailing_semicolon_is_allowed_but_empty_statement_is_ignored():
     validate_select("SELECT 1;")

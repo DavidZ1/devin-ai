@@ -16,9 +16,10 @@ def shape_result(
     rows: Iterable[Iterable[Any]],
     max_rows: int,
     max_result_chars: int,
+    more_rows: bool = False,
 ) -> dict[str, Any]:
     all_rows = [[serialize_value(value) for value in row] for row in rows]
-    truncated = len(all_rows) > max_rows
+    truncated = len(all_rows) > max_rows or more_rows
     result: dict[str, Any] = {
         "columns": list(columns),
         "rows": all_rows[:max_rows],

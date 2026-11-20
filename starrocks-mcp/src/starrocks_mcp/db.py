@@ -43,7 +43,8 @@ def database_connection(settings: Settings) -> Iterator[pymysql.connections.Conn
     try:
         yield connection
     finally:
-        connection.close()
+        if connection.open:
+            connection.close()
 
 
 def set_select_limit(connection: pymysql.connections.Connection, max_rows: int) -> None:
@@ -52,6 +53,34 @@ def set_select_limit(connection: pymysql.connections.Connection, max_rows: int) 
             cursor.execute(f"SET sql_select_limit = {int(max_rows) + 1}")
     except Exception as exc:
         logger.warning("Could not set StarRocks sql_select_limit: %s", exc)
+
+
+def fetch_bounded(
+    connection: pymysql.connections.Connection, sql: str, limit: int
+) -> tuple[list[str], list[tuple[Any, ...]], bool]:
+    cursor = connection.cursor(pymysql.cursors.SSCursor)
+    close_cursor = True
+    try:
+        cursor.execute(sql)
+        columns = [
+            str(description[0]) for description in (cursor.description or ())
+        ]
+        rows = cursor.fetchmany(limit + 1)
+        more = len(rows) > limit
+        if more:
+            force_close = getattr(connection, "_force_close", None)
+            try:
+                if callable(force_close):
+                    force_close()
+                else:
+                    connection.close()
+            finally:
+                cursor.connection = None
+                close_cursor = False
+        return columns, rows[: limit + 1], more
+    finally:
+        if close_cursor:
+            cursor.close()
 
 
 def serialize_value(value: Any) -> Any:

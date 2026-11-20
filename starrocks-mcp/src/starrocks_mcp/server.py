@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -16,12 +17,13 @@ from . import db
 from .audit import record_event
 from .auth import AuthMiddleware, AuthenticationError, resolve_caller
 from .config import Settings, database_is_allowed
-from .results import shape_result
+from .results import TRUNCATION_NOTE, shape_result
 from .sql_guard import SqlRejected, validate_select
 
 logger = logging.getLogger(__name__)
 mcp = FastMCP("starrocks-mcp")
 SETTINGS = Settings.from_env()
+PLAN_TRUNCATION_NOTE = "... 执行计划已截断 / Plan truncated"
 
 
 def _caller(settings: Settings) -> dict[str, str]:
@@ -49,6 +51,19 @@ def _safe_error(exc: Exception, settings: Settings) -> str:
     if isinstance(exc, SqlRejected):
         return str(exc)
     return db.safe_database_error(exc, settings)
+
+
+def _serialized_length(value: dict[str, Any]) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+
+def _limit_plan_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    suffix = f"\n{PLAN_TRUNCATION_NOTE}"
+    if max_chars <= len(PLAN_TRUNCATION_NOTE):
+        return PLAN_TRUNCATION_NOTE[:max_chars]
+    return f"{text[: max_chars - len(suffix)].rstrip()}{suffix}"
 
 
 def _run_audited(
@@ -172,13 +187,21 @@ def _describe_table(
                     [db.serialize_value(value) for value in row]
                     for row in cursor.fetchmany(sample_rows)
                 ]
-    return {
+    result = {
         "database": database,
         "table": table,
         "comment": table_row[0],
         "columns": columns,
         "sample_rows": sample,
     }
+    if _serialized_length(result) > settings.max_result_chars:
+        result["sample_truncated"] = True
+        result["note"] = TRUNCATION_NOTE
+        while result["sample_rows"] and (
+            _serialized_length(result) > settings.max_result_chars
+        ):
+            result["sample_rows"].pop()
+    return result
 
 
 def _use_database(connection: Any, database: str) -> None:
@@ -203,15 +226,15 @@ def _run_query(
         if database:
             _use_database(connection, database)
         db.set_select_limit(connection, effective_max_rows)
-        with connection.cursor() as cursor:
-            cursor.execute(sql)
-            columns = [str(description[0]) for description in (cursor.description or ())]
-            rows = cursor.fetchmany(effective_max_rows + 1)
+        columns, rows, more = db.fetch_bounded(
+            connection, sql, effective_max_rows
+        )
     result = shape_result(
         columns,
         rows,
         max_rows=effective_max_rows,
         max_result_chars=settings.max_result_chars,
+        more_rows=more,
     )
     result["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
     return result
@@ -232,7 +255,12 @@ def _explain_query(sql: str, database: str | None, settings: Settings) -> str:
         with connection.cursor() as cursor:
             cursor.execute(f"EXPLAIN {sql}")
             rows = cursor.fetchmany(settings.max_rows + 1)
-    return "\n".join("\t".join(str(value) for value in row) for row in rows)
+    more = len(rows) > settings.max_rows
+    rows = rows[: settings.max_rows]
+    text = "\n".join("\t".join(str(value) for value in row) for row in rows)
+    if more:
+        text = f"{text}\n{PLAN_TRUNCATION_NOTE}" if text else PLAN_TRUNCATION_NOTE
+    return _limit_plan_text(text, settings.max_result_chars)
 
 
 @mcp.tool(description="列出当前账号可访问的数据库；系统数据库默认隐藏。")

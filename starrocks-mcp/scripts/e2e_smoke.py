@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from typing import Any
 
 from fastmcp import Client
@@ -58,9 +59,41 @@ async def main() -> None:
             ),
         ]
         for name, result in results:
-            if getattr(result, "isError", False):
+            if getattr(result, "is_error", False):
                 raise AssertionError(f"{name} returned an MCP error: {printable(result)}")
             print(f"{name}: {printable(result)[:500]}")
+
+        large_sql = (
+            f"SELECT a.id FROM `{DATABASE}`.`{TABLE}` AS a "
+            f"CROSS JOIN `{DATABASE}`.`{TABLE}` AS b "
+            f"CROSS JOIN `{DATABASE}`.`{TABLE}` AS c LIMIT 100000"
+        )
+        started = time.perf_counter()
+        large_result = await client.call_tool(
+            "run_query",
+            {"sql": large_sql, "database": DATABASE, "max_rows": 10},
+        )
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        if getattr(large_result, "is_error", False):
+            raise AssertionError(
+                f"large-LIMIT run_query failed: {printable(large_result)}"
+            )
+        large_content = getattr(large_result, "structured_content", None)
+        if not isinstance(large_content, dict):
+            raise AssertionError(
+                f"large-LIMIT run_query returned no structured content: "
+                f"{printable(large_result)}"
+            )
+        if large_content.get("truncated") is not True:
+            raise AssertionError(
+                f"large-LIMIT query was not truncated: {printable(large_result)}"
+            )
+        print(
+            "large-LIMIT run_query: "
+            f"row_count={large_content.get('row_count')}, "
+            f"truncated={large_content.get('truncated')}, "
+            f"elapsed_ms={elapsed_ms:.2f}"
+        )
 
         try:
             write_result = await client.call_tool(
@@ -75,7 +108,7 @@ async def main() -> None:
                 raise
             print(f"write rejection: {exc}")
         else:
-            if not getattr(write_result, "isError", False):
+            if not getattr(write_result, "is_error", False):
                 raise AssertionError("write SQL was not rejected")
             print(f"write rejection: {printable(write_result)[:300]}")
 

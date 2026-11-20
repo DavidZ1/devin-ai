@@ -32,6 +32,20 @@ def test_row_limit_sets_truncation_flag():
     assert result["note"] == TRUNCATION_NOTE
 
 
+def test_fetching_more_than_the_row_limit_sets_truncation_flag():
+    result = shape_result(
+        ["n"],
+        [[1], [2]],
+        max_rows=2,
+        max_result_chars=500,
+        more_rows=True,
+    )
+    assert result["rows"] == [[1], [2]]
+    assert result["row_count"] == 2
+    assert result["truncated"] is True
+    assert result["note"] == TRUNCATION_NOTE
+
+
 def test_character_limit_drops_rows_and_adds_note():
     result = shape_result(
         ["value"],

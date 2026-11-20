@@ -82,7 +82,19 @@ def validate_select(
     }
     effective_database = database or default_db
     for table in query.find_all(exp.Table):
-        if table.name and table.name.casefold() in cte_names:
+        if not isinstance(table.this, exp.Identifier):
+            raise SqlRejected("不允许表函数 / Table functions are not allowed.")
+        catalog = table.catalog
+        if catalog and catalog.casefold() != "default_catalog":
+            raise SqlRejected(
+                "不允许外部 catalog / External catalogs are not allowed."
+            )
+        if (
+            not table.db
+            and not catalog
+            and table.name
+            and table.name.casefold() in cte_names
+        ):
             continue
         table_database = table.db or effective_database
         if not table_database:
